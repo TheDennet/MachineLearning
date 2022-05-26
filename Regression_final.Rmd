@@ -1,0 +1,321 @@
+---
+title: "Regressionr"
+author: "RUPESH ANUSURI"
+date: "Submission time: May 26, 2022 at 11:00PM EST"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load packages
+
+```{r, load_packages}
+library(tidyverse)
+library(caret)
+library(modeldata)
+library(tidymodels)
+library(pls) # for pcr analysis
+library(vip) # for variable importance
+library(Metrics)
+library(glmnet)
+library(xgboost)
+library(reshape2)
+library(patchwork)
+library(yardstick)
+```
+
+### Getting the dataset:
+
+```{r}
+data(meats)
+
+#Removing other dependent variables
+meats <- subset (meats, select = -c(fat,protein))
+```
+
+### Splitting into test data and train data with stratified sampling:
+
+```{r}
+set.seed(123)
+split_strat  <- initial_split(meats, prop = 0.8, 
+                              strata = "water")
+meats_train  <- training(split_strat)
+meats_test   <- testing(split_strat)
+```
+
+### Training and fitting models using RMSE metric:
+
+```{r}
+my_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+my_metric <- "RMSE"
+
+set.seed(123)
+mod_lm <- train(water ~ .,
+                     data = meats_train,
+                     method = 'lm',
+                     metric = my_metric,
+                     preProcess = c("center", "scale"),
+                     trControl = my_ctrl)
+
+set.seed(123)
+mod_enet <- train(water ~ .,
+                      data = meats_train,
+                      method = 'glmnet',
+                      metric = my_metric,
+                      preProcess = c("center", "scale"),
+                      trControl = my_ctrl)
+
+set.seed(123)
+mod_nnet <- train(water ~ .,
+                            data = meats_train,
+                            method = "nnet",
+                            preProcess = c("center", "scale"),
+                            metric = my_metric,
+                            trControl = my_ctrl,
+                            trace = FALSE,
+                            linout = TRUE)
+
+set.seed(123)
+mod_xgboost <- train(water ~ .,
+                     data = meats_train,
+                     method = 'xgbTree',
+                     metric = my_metric,
+                     trControl = my_ctrl)
+
+set.seed(123)
+mod_rf <- train(water ~ .,
+                     data = meats_train,
+                     method = 'rf',
+                     metric = my_metric,
+                     preProcess = c("center", "scale"),
+                     trControl = my_ctrl)
+```
+
+```{r}
+set.seed(123)
+mod_pcr <- train(water ~ .,
+                 data = meats_train,
+                 method = "pcr",
+                 trControl = my_ctrl,
+                 preProcess = c("zv","center", "scale"),
+                 #metric = my_metric,
+                 tuneLength = 100)
+```
+
+### Comparision of models on resampled dataset:
+
+```{r}
+results = resamples(list(lm = mod_lm,
+                         enet = mod_enet,
+                         nnet = mod_nnet,
+                         xgboost = mod_xgboost,
+                         rf = mod_rf
+                         ))
+dotplot(results, metric = "RMSE")
+```
+
+`mod_nnet` has the lowest RMSE, by far, on the resampled dataset. 
+
+### Performance on hold-out test data 
+
+```{r}
+test_data <- subset (meats_test, select = -c(water))
+```
+
+```{r}
+pred_water_lm <- as.data.frame(predict(mod_lm, newdata = test_data))
+
+compare_water_pred_lm <- cbind(meats_test, pred_water_lm)
+names(compare_water_pred_lm)[ncol(compare_water_pred_lm)] <- "predicted_water_content"
+
+compare_water_pred_lm %>% ggplot(aes(x = water, y = predicted_water_content))+
+  geom_point()+
+  geom_abline(slope=1, intercept=0, colour = "red", size = 0.8)+
+  xlab("Observed water content")
+###
+
+pred_water_enet <- as.data.frame(predict(mod_enet, newdata = test_data))
+
+compare_water_pred_enet <- cbind(meats_test, pred_water_enet)
+names(compare_water_pred_enet)[ncol(compare_water_pred_enet)] <- "predicted_water_content"
+
+compare_water_pred_enet %>% ggplot(aes(x = water, y = predicted_water_content))+
+  geom_point()+
+  geom_abline(slope=1, intercept=0, colour = "red", size = 0.8)+
+  xlab("Observed water content")
+###
+
+pred_water_nnet <- as.data.frame(predict(mod_nnet, newdata = test_data))
+
+compare_water_pred_nnet <- cbind(meats_test, pred_water_nnet)
+names(compare_water_pred_nnet)[ncol(compare_water_pred_nnet)] <- "predicted_water_content"
+
+compare_water_pred_nnet %>% ggplot(aes(x = water, y = predicted_water_content))+
+  geom_point()+
+  geom_abline(slope=1, intercept=0, colour = "red", size = 0.8)+
+  xlab("Observed water content")
+###
+
+pred_water_xgb <- as.data.frame(predict(mod_xgboost, newdata = test_data))
+
+compare_water_pred_xgb <- cbind(meats_test, pred_water_xgb)
+names(compare_water_pred_xgb)[ncol(compare_water_pred_xgb)] <- "predicted_water_content"
+
+compare_water_pred_xgb %>% ggplot(aes(x = water, y = predicted_water_content))+
+  geom_point()+
+  geom_abline(slope=1, intercept=0, colour = "red", size = 0.8)+
+  xlab("Observed water content")
+###
+
+pred_water_rf <- as.data.frame(predict(mod_rf, newdata = test_data))
+
+compare_water_pred_rf <- cbind(meats_test, pred_water_rf)
+names(compare_water_pred_rf)[ncol(compare_water_pred_rf)] <- "predicted_water_content"
+
+compare_water_pred_rf %>% ggplot(aes(x = water, y = predicted_water_content))+
+  geom_point()+
+  geom_abline(slope=1, intercept=0, colour = "red", size = 0.8)+
+  xlab("Observed water content")
+```
+
+The neural network performs best on the test data too.
+
+### Quantifying the model fits on test data set with RMSE
+
+```{r}
+#contour_data <- as.data.frame(matrix())
+rmse_lm = rmse(actual = compare_water_pred_lm$water, predicted = compare_water_pred_lm$predicted_water_content)
+
+rmse_enet = rmse(actual = compare_water_pred_enet$water, predicted = compare_water_pred_enet$predicted_water_content)
+
+rmse_nnet = rmse(actual = compare_water_pred_nnet$water, predicted = compare_water_pred_nnet$predicted_water_content)
+
+rmse_xgb = rmse(actual = compare_water_pred_xgb$water, predicted = compare_water_pred_xgb$predicted_water_content)
+
+rmse_rf = rmse(actual = compare_water_pred_rf$water, predicted = compare_water_pred_rf$predicted_water_content)
+
+rmse_lm
+rmse_enet
+rmse_nnet
+rmse_xgb
+rmse_rf
+```
+
+### Visualizing RMSE values of fits on test data
+
+```{r}
+my_Frame <- tribble(
+  ~model  ,     ~RMSE,    
+   "lm"   ,        2.06892,
+   "enet" ,        2.4097,
+   "nnet" ,        1.33733,
+   "xgb"  ,        6.586896,
+   "rf"   ,       5.98447
+)
+
+my_Frame %>% ggplot(aes(x = model, y = RMSE))+
+  geom_point(size = 4)
+```
+
+### Looking at important variables according to the different models:
+
+```{r}
+plot(varImp(mod_lm), top = 20)
+plot(varImp(mod_enet), top = 20)
+plot(varImp(mod_nnet), top = 20)
+plot(varImp(mod_xgboost), top = 20)
+plot(varImp(mod_rf), top = 20)
+#plot(varImp(mod_pcr), top = 20)
+```
+
+`x_040`, `x_042`, `x_041` are considered prominent by all models except the neural network. The neural network thinks `x_100` is indispensable and that `x_098` is also important.
+
+But since the neural network seems to perform best on both training and test data, I choose its preferred variables to be more important.
+
+```{r}
+#for(i in 1:6){
+#  viz_data[2] = var_2[i]
+#  new_predicted_data <- predict(mod_nnet, viz_data)
+  
+#  assign(paste("viz_data", i, sep = "_"), cbind(viz_data, new_predicted_data))
+  #viz_data <- cbind(viz_data, new_predicted_data)
+
+#  temp_plot = v[i] %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+  
+#  assign(paste("p",i, sep=""), temp)
+  #viz_data <- subset(viz_data, select = -predicted_water_content)
+#}
+```
+
+### Predicting water content using 2 most important variables.
+
+```{r}
+# Six data points on the "facet" variable
+var_2 = seq(min(meats[98]), max(meats[98]), length.out=6)
+
+# Creating 6 new data frames each with one data point for the facet variable.
+viz_data <- select(meats, x_100, x_098)
+j=3
+
+for(i in 1:100){
+  if((i != 100) && (i!= 98)){
+    viz_data[j] = median(as.data.frame(meats)[,i])
+    colnames(viz_data)[j] <- colnames(meats)[i]
+    j = j+1
+  }
+}
+
+# viz_data_1
+## set value of facet variable
+viz_data[2] = var_2[1]
+## predict response using updated dataset
+new_predicted_data <- predict(mod_nnet, viz_data)
+viz_data_1 <- cbind(viz_data, new_predicted_data)
+##renaming column of predictde water content
+names(viz_data_1)[ncol(viz_data_1)] <- "predicted_water_content"
+## Assigning the plot to a variable
+p1 = viz_data_1 %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+
+# viz_data_1
+viz_data[2] = var_2[2]
+new_predicted_data <- predict(mod_nnet, viz_data)
+viz_data_2 <- cbind(viz_data, new_predicted_data)
+names(viz_data_2)[ncol(viz_data_2)] <- "predicted_water_content"
+p2 = viz_data_2 %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+
+# viz_data_1
+viz_data[2] = var_2[3]
+new_predicted_data <- predict(mod_nnet, viz_data)
+viz_data_3 <- cbind(viz_data, new_predicted_data)
+names(viz_data_3)[ncol(viz_data_3)] <- "predicted_water_content"
+p3 = viz_data_3 %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+
+# viz_data_1
+viz_data[2] = var_2[4]
+new_predicted_data <- predict(mod_nnet, viz_data)
+viz_data_4 <- cbind(viz_data, new_predicted_data)
+names(viz_data_4)[ncol(viz_data_4)] <- "predicted_water_content"
+p4 = viz_data_4 %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+
+# viz_data_1
+viz_data[2] = var_2[5]
+new_predicted_data <- predict(mod_nnet, viz_data)
+viz_data_5 <- cbind(viz_data, new_predicted_data)
+names(viz_data_5)[ncol(viz_data_5)] <- "predicted_water_content"
+p5 = viz_data_5 %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+
+# viz_data_1
+viz_data[2] = var_2[6]
+new_predicted_data <- predict(mod_nnet, viz_data)
+viz_data_6 <- cbind(viz_data, new_predicted_data)
+names(viz_data_6)[ncol(viz_data_6)] <- "predicted_water_content"
+p6 = viz_data_6 %>% ggplot(aes(x = x_100, y = predicted_water_content))+geom_point()
+```
+
+### Plotting water content wrt `x_100` as primary variable and different values of facet variable `x_098`:
+
+```{r}
+(p1+p2+p3) / (p4+p5+p6)
+```

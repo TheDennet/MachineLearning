@@ -1,0 +1,334 @@
+---
+title: "Classification"
+author: "RUPESH ANUSURI"
+date: "Submission time: May 26, 2022 at 11:00PM EST"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load packages
+
+```{r}
+library(tidyverse)
+library(caret)
+library(modeldata)
+library(tidymodels)
+library(pls) # for pcr analysis
+library(vip) # for variable importance
+library(Metrics)
+library(glmnet)
+library(xgboost)
+library(reshape2)
+library(patchwork)
+library(yardstick)
+library(splines)
+```
+
+### Loading dataset
+
+Separating into test data and train data according to the `case` column.
+```{r}
+data(cells)
+
+cells_train <- as.data.frame(cells %>%
+                               filter(case == "Train") %>%
+                               subset(select = -c(case)
+                            ))
+cells_test <- as.data.frame(cells %>%
+                              filter(case == "Test") %>%
+                              subset(select = -c(case)
+                            ))
+```
+
+### Checking for balance of response variables.
+
+```{r}
+cells_train %>% count(class)
+```
+
+It is fairly well balanced at about 37%.
+
+### Fitting models using "Accuracy" metric:
+
+```{r}
+ctrl_acc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3)
+
+metric_acc <- "Accuracy"
+
+### model 1
+set.seed(2022)
+mod_glm_acc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'glm',
+                   metric = metric_acc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_acc)
+
+### model 2
+set.seed(2022)
+mod_glmnet_acc <- train(class ~ .,
+                  data = cells_train,
+                  method = 'glmnet',
+                  metric = metric_acc,
+                  preProcess = c("center", "scale"),
+                  trControl = ctrl_acc,
+                  family = "binomial"
+                 )
+
+# model 3
+set.seed(2022)
+mod_nnet_acc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'nnet',
+                   metric = metric_acc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_acc,
+                   trace = FALSE)
+
+# model 4
+set.seed(2022)
+mod_rf_acc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'rf',
+                   metric = metric_acc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_acc,
+                   trace = FALSE)
+
+# model 5
+set.seed(2022)
+mod_xgb_acc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'xgbTree',
+                   metric = metric_acc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_acc,
+                   verbosity = 0)
+```
+
+```{r}
+acc_results <- resamples(list(mod_glm_a = mod_glm_acc,
+                              mod_glmnet_a = mod_glmnet_acc,
+                              mod_nnet_a = mod_nnet_acc,
+                              mod_rf_a = mod_rf_acc,
+                              mod_xgb_a = mod_xgb_acc
+                              ))
+```
+
+### Visualizing accuracy of the models:
+
+```{r}
+dotplot(acc_results, metric = 'Accuracy')
+
+as.data.frame(acc_results, method = 'Accuracy') %>% 
+  pivot_longer(!c("Resample")) %>% 
+  mutate(name = forcats::fct_reorder(name, value, mean)) %>% 
+  ggplot(mapping = aes(x = name, y = value)) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               size = 1.25) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 1),
+               color = 'red',
+               size = 2) +
+  theme_bw()
+
+dotplot(acc_results)
+```
+
+`mod_rf_acc` and `mod_xgb_acc` seem to be good and their accuracy is comparable. The rest of the models are just outside 1 standard error of this mean accuracy.
+
+### Fitting models using "ROC" metric:
+
+```{r}
+ctrl_roc <- trainControl(method = 'repeatedcv', number = 10, repeats = 3,
+                         summaryFunction = twoClassSummary,
+                         classProbs = TRUE,
+                         savePredictions = TRUE)
+
+metric_roc <- "ROC"
+
+set.seed(2022)
+mod_glm_roc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'glm',
+                   metric = metric_roc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_roc)
+
+set.seed(2022)
+mod_glmnet_roc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'glmnet',
+                   metric = metric_roc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_roc)
+
+set.seed(2022)
+mod_nnet_roc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'nnet',
+                   metric = metric_roc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_roc,
+                   trace = FALSE)
+
+set.seed(2022)
+mod_rf_roc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'rf',
+                   metric = metric_roc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_roc)
+
+set.seed(2022)
+mod_xgb_roc <- train(class ~ .,
+                   data = cells_train,
+                   method = 'xgbTree',
+                   metric = metric_roc,
+                   preProcess = c("center", "scale"),
+                   trControl = ctrl_roc)
+```
+
+```{r}
+confusionMatrix(mod_rf_roc)
+```
+
+```{r}
+roc_results <- resamples(list(mod_glm_r = mod_glm_roc,
+                              mod_glmnet_r = mod_glmnet_roc,
+                              mod_nnet_r = mod_nnet_roc,
+                              mod_rf_r = mod_rf_roc,
+                              mod_xgb_r = mod_xgb_roc
+                              ))
+```
+
+```{r}
+dotplot(roc_results, metric = 'ROC')
+
+dotplot(roc_results)
+
+as.data.frame(roc_results, method = 'ROC') %>% 
+  pivot_longer(!c("Resample")) %>% 
+  mutate(name = forcats::fct_reorder(name, value, mean)) %>% 
+  ggplot(mapping = aes(x = name, y = value)) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               size = 1.25) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 1),
+               color = 'red',
+               size = 2) +
+  theme_bw()
+```
+
+The ROC results also have the same trend, with `mod_rf_roc` and `mod_xgb_roc` performing the best while the logistic regression model `mod_glm_roc` is the worst, comparatively.
+
+### Individual ROC curves
+
+```{r}
+mod_glm_roc$pred %>% 
+  roc_curve(obs, PS) %>% 
+  autoplot()
+
+mod_glmnet_roc$pred %>% 
+  roc_curve(obs, PS) %>% 
+  autoplot()
+
+mod_nnet_roc$pred %>% 
+  roc_curve(obs, PS) %>% 
+  autoplot()
+
+mod_rf_roc$pred %>% 
+  roc_curve(obs, PS) %>% 
+  autoplot()
+
+mod_xgb_roc$pred %>% 
+  roc_curve(obs, PS) %>% 
+  autoplot()
+```
+
+### Overlaid ROC curves
+
+```{r}
+compile_all_model_preds <- function(m1, m2, m3, m4, m5)
+{
+  purrr::map2_dfr(list(m1, m2, m3, m4, m5),
+                  as.character(seq_along(list(m1, m2, m3, m4, m5))),
+                  function(ll, lm){
+                    ll$pred %>% tibble::as_tibble() %>% 
+                      select(obs, PS, Resample) %>% 
+                      mutate(model_name = lm)
+                  })
+}
+
+all_model_preds <- compile_all_model_preds(mod_glm_roc,
+                                           mod_glmnet_roc,
+                                           mod_nnet_roc,
+                                           mod_rf_roc,
+                                           mod_xgb_roc)
+
+all_model_preds %>% 
+  group_by(model_name) %>% 
+  roc_curve(obs, PS) %>% 
+  autoplot()
+```
+
+### Evaluation of performance on hold-out test data using calibration curves:
+
+```{r}
+pred_test_glm <- predict(mod_glm_acc, newdata = cells_test, type = 'prob')
+test_df_glm <- cells_test %>% bind_cols(pred_test_glm)
+
+pred_test_rf <- predict(mod_rf_acc, newdata = cells_test, type = 'prob')
+test_df_rf <- cells_test %>% bind_cols(pred_test_rf)
+```
+
+
+```{r}
+caret::calibration(class ~ PS, data = test_df_glm, cuts = 10) %>% 
+  xyplot()
+
+caret::calibration(class ~ PS, data = test_df_rf, cuts = 10) %>% 
+  xyplot()
+```
+
+The `mod_rf` is consistently closer to the `y = x` line and `mod_glm` is farther away. But the difference is not that great, just like we saw in resampling performance using both Accuracy and ROC metrics.
+
+### Overlaid calibration curves:
+
+```{r}
+test_df_glm %>% 
+  select(class, mod_glm_roc = PS) %>% 
+  tibble::rowid_to_column() %>% 
+  left_join(test_df_rf %>% 
+              select(class, mod_rf_roc = PS) %>% 
+              tibble::rowid_to_column(),
+            by = c("rowid", "class")) %>%
+  caret::calibration(class ~ mod_glm_roc + mod_rf_roc, data = ., cuts = 10) %>% 
+  xyplot(auto.key = list(columns = 2))
+```
+
+### Confusion matrix of test data for `mod_rf`:
+
+```{r}
+pre <- predict(mod_rf_acc, newdata =cells_test[, -1], type = 'raw')
+confusionMatrix(pre, reference = cells_test$class)
+```
+
+### ROC curve of `mod_rf` on test data:
+
+```{r}
+library(MLeval)
+predd <- predict(mod_rf_roc, newdata=cells_test, type="prob")
+test1 <- evalm(data.frame(predd, cells_test$class))
+```
+
+The ROC value on this test data is 0.89, close to the 0.9 on the resampling data.
+
+### Conclusion:
+
+While the random forest model was good, the "worst" model given by logistic regression was not unacceptable either. But using a logistic regression model with two random variables and their interaction gave a model with about 0.8 ROC value. It is probably because many of the variables are highly correlated (a big cell will have large values of length and also, width, area, etc. and they seem to be well segmented.)
